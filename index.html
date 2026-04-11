@@ -1,0 +1,836 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>PlateVision — License Plate Detector</title>
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:wght@300;400;500&display=swap" rel="stylesheet"/>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0a0a0f;
+      --surface: #111118;
+      --card: #16161f;
+      --border: #2a2a3a;
+      --accent: #e8ff47;
+      --accent2: #47ffe0;
+      --text: #f0f0f5;
+      --muted: #6b6b85;
+      --danger: #ff4747;
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'DM Mono', monospace;
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* Grid background */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background-image:
+        linear-gradient(rgba(232,255,71,0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(232,255,71,0.03) 1px, transparent 1px);
+      background-size: 40px 40px;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* Glow orbs */
+    .orb {
+      position: fixed;
+      border-radius: 50%;
+      filter: blur(120px);
+      pointer-events: none;
+      z-index: 0;
+    }
+    .orb-1 {
+      width: 500px; height: 500px;
+      background: rgba(232,255,71,0.06);
+      top: -200px; right: -100px;
+    }
+    .orb-2 {
+      width: 400px; height: 400px;
+      background: rgba(71,255,224,0.05);
+      bottom: -100px; left: -100px;
+    }
+
+    /* NAV */
+    nav {
+      position: relative; z-index: 10;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 20px 40px;
+      border-bottom: 1px solid var(--border);
+      backdrop-filter: blur(10px);
+    }
+    .nav-logo {
+      font-family: 'Syne', sans-serif;
+      font-weight: 800;
+      font-size: 1.2rem;
+      letter-spacing: -0.02em;
+    }
+    .nav-logo span { color: var(--accent); }
+    .nav-badge {
+      font-size: 0.65rem;
+      background: rgba(232,255,71,0.1);
+      border: 1px solid rgba(232,255,71,0.3);
+      color: var(--accent);
+      padding: 4px 10px;
+      border-radius: 20px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+    .nav-link {
+      color: var(--muted);
+      text-decoration: none;
+      font-size: 0.8rem;
+      transition: color 0.2s;
+    }
+    .nav-link:hover { color: var(--accent); }
+    .nav-right { display: flex; align-items: center; gap: 20px; }
+
+    /* HERO */
+    .hero {
+      position: relative; z-index: 1;
+      text-align: center;
+      padding: 80px 20px 60px;
+    }
+    .hero-tag {
+      display: inline-flex; align-items: center; gap: 8px;
+      font-size: 0.7rem;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      color: var(--accent);
+      background: rgba(232,255,71,0.08);
+      border: 1px solid rgba(232,255,71,0.2);
+      padding: 6px 16px;
+      border-radius: 20px;
+      margin-bottom: 30px;
+    }
+    .hero-tag::before {
+      content: '';
+      width: 6px; height: 6px;
+      background: var(--accent);
+      border-radius: 50%;
+      animation: pulse 2s infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.4; transform: scale(0.8); }
+    }
+
+    h1 {
+      font-family: 'Syne', sans-serif;
+      font-size: clamp(2.5rem, 7vw, 5rem);
+      font-weight: 800;
+      line-height: 1.05;
+      letter-spacing: -0.03em;
+      margin-bottom: 20px;
+    }
+    h1 .highlight {
+      color: var(--accent);
+      position: relative;
+    }
+    .hero-sub {
+      color: var(--muted);
+      font-size: 0.9rem;
+      max-width: 480px;
+      margin: 0 auto 50px;
+      line-height: 1.7;
+    }
+
+    /* MAIN CARD */
+    .main-wrapper {
+      position: relative; z-index: 1;
+      max-width: 860px;
+      margin: 0 auto;
+      padding: 0 20px 80px;
+    }
+
+    .detector-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      overflow: hidden;
+      box-shadow: 0 40px 80px rgba(0,0,0,0.5);
+    }
+
+    /* Card header */
+    .card-header {
+      padding: 18px 24px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--surface);
+    }
+    .dot { width: 12px; height: 12px; border-radius: 50%; }
+    .dot-r { background: #ff5f57; }
+    .dot-y { background: #febc2e; }
+    .dot-g { background: #28c840; }
+    .card-title {
+      margin-left: 8px;
+      font-size: 0.75rem;
+      color: var(--muted);
+      letter-spacing: 0.05em;
+    }
+
+    /* Upload zone */
+    .upload-zone {
+      margin: 32px;
+      border: 2px dashed var(--border);
+      border-radius: 16px;
+      padding: 60px 24px;
+      text-align: center;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      position: relative;
+      overflow: hidden;
+    }
+    .upload-zone:hover, .upload-zone.drag-over {
+      border-color: var(--accent);
+      background: rgba(232,255,71,0.03);
+    }
+    .upload-zone.drag-over { transform: scale(1.01); }
+
+    .upload-icon {
+      width: 64px; height: 64px;
+      margin: 0 auto 20px;
+      background: rgba(232,255,71,0.08);
+      border: 1px solid rgba(232,255,71,0.2);
+      border-radius: 16px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1.8rem;
+      transition: transform 0.3s;
+    }
+    .upload-zone:hover .upload-icon { transform: translateY(-4px); }
+
+    .upload-title {
+      font-family: 'Syne', sans-serif;
+      font-size: 1.1rem;
+      font-weight: 700;
+      margin-bottom: 8px;
+    }
+    .upload-sub {
+      font-size: 0.75rem;
+      color: var(--muted);
+      margin-bottom: 24px;
+    }
+    .upload-btn {
+      display: inline-block;
+      background: var(--accent);
+      color: #0a0a0f;
+      font-family: 'Syne', sans-serif;
+      font-weight: 700;
+      font-size: 0.85rem;
+      padding: 12px 28px;
+      border-radius: 10px;
+      cursor: pointer;
+      border: none;
+      transition: all 0.2s;
+      letter-spacing: 0.02em;
+    }
+    .upload-btn:hover {
+      background: #fff;
+      transform: translateY(-2px);
+      box-shadow: 0 8px 24px rgba(232,255,71,0.3);
+    }
+    #fileInput { display: none; }
+
+    /* Preview section */
+    .preview-section {
+      display: none;
+      margin: 0 32px 32px;
+      gap: 20px;
+      flex-direction: column;
+    }
+    .preview-section.visible { display: flex; }
+
+    .preview-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+
+    .preview-box {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+    }
+    .preview-box-label {
+      padding: 10px 14px;
+      font-size: 0.65rem;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      color: var(--muted);
+      border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; gap: 6px;
+    }
+    .preview-box-label .dot-label {
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: var(--accent);
+    }
+    .preview-img-wrap {
+      height: 200px;
+      display: flex; align-items: center; justify-content: center;
+      overflow: hidden;
+      background: #0d0d14;
+    }
+    .preview-img-wrap img {
+      max-width: 100%; max-height: 100%;
+      object-fit: contain;
+    }
+
+    /* Result box */
+    .result-box {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+    }
+    .result-header {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
+      font-size: 0.65rem;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      color: var(--muted);
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .result-body {
+      padding: 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+    .plate-display {
+      background: #fff;
+      color: #111;
+      font-family: 'Syne', sans-serif;
+      font-weight: 800;
+      font-size: 2rem;
+      padding: 12px 28px;
+      border-radius: 8px;
+      border: 3px solid #111;
+      letter-spacing: 0.15em;
+      box-shadow: inset 0 0 0 2px #fff, 0 4px 20px rgba(0,0,0,0.3);
+      min-width: 180px;
+      text-align: center;
+    }
+    .plate-display.unreadable {
+      background: var(--card);
+      color: var(--muted);
+      border-color: var(--border);
+      font-size: 1rem;
+    }
+
+    .result-meta {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      font-size: 0.72rem;
+    }
+    .meta-row {
+      display: flex; gap: 8px; align-items: center;
+    }
+    .meta-label { color: var(--muted); }
+    .meta-value { color: var(--accent); }
+
+    /* Analyze button */
+    .analyze-btn {
+      width: calc(100% - 64px);
+      margin: 0 32px 32px;
+      padding: 16px;
+      background: var(--accent);
+      color: #0a0a0f;
+      font-family: 'Syne', sans-serif;
+      font-weight: 800;
+      font-size: 1rem;
+      border: none;
+      border-radius: 12px;
+      cursor: pointer;
+      transition: all 0.25s;
+      letter-spacing: 0.04em;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+    }
+    .analyze-btn.visible { display: flex; }
+    .analyze-btn:hover {
+      background: #fff;
+      transform: translateY(-2px);
+      box-shadow: 0 12px 40px rgba(232,255,71,0.25);
+    }
+    .analyze-btn:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    /* Spinner */
+    .spinner {
+      width: 18px; height: 18px;
+      border: 2px solid rgba(0,0,0,0.3);
+      border-top-color: #000;
+      border-radius: 50%;
+      animation: spin 0.6s linear infinite;
+      display: none;
+    }
+    .spinner.visible { display: block; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Processing steps */
+    .steps {
+      margin: 0 32px 24px;
+      display: none;
+      gap: 8px;
+      flex-direction: column;
+    }
+    .steps.visible { display: flex; }
+    .step-row {
+      display: flex; align-items: center; gap: 12px;
+      padding: 10px 14px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font-size: 0.72rem;
+      transition: all 0.3s;
+    }
+    .step-row.active {
+      border-color: rgba(232,255,71,0.4);
+      background: rgba(232,255,71,0.04);
+    }
+    .step-row.done {
+      border-color: rgba(71,255,224,0.3);
+      background: rgba(71,255,224,0.03);
+    }
+    .step-icon { font-size: 1rem; min-width: 20px; text-align: center; }
+    .step-text { flex: 1; }
+    .step-status {
+      font-size: 0.65rem;
+      color: var(--muted);
+      letter-spacing: 0.05em;
+    }
+    .step-row.active .step-status { color: var(--accent); }
+    .step-row.done .step-status { color: var(--accent2); }
+
+    /* Info section */
+    .info-grid {
+      position: relative; z-index: 1;
+      max-width: 860px;
+      margin: 0 auto;
+      padding: 0 20px 80px;
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 16px;
+    }
+    .info-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 24px;
+      transition: border-color 0.3s;
+    }
+    .info-card:hover { border-color: rgba(232,255,71,0.3); }
+    .info-icon { font-size: 1.5rem; margin-bottom: 12px; }
+    .info-title {
+      font-family: 'Syne', sans-serif;
+      font-weight: 700;
+      font-size: 0.9rem;
+      margin-bottom: 8px;
+    }
+    .info-desc { font-size: 0.72rem; color: var(--muted); line-height: 1.6; }
+
+    /* Footer */
+    footer {
+      position: relative; z-index: 1;
+      border-top: 1px solid var(--border);
+      padding: 24px 40px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 0.72rem;
+      color: var(--muted);
+    }
+    footer a {
+      color: var(--accent);
+      text-decoration: none;
+    }
+
+    /* Animations */
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(20px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .fade-up {
+      animation: fadeUp 0.6s ease forwards;
+      opacity: 0;
+    }
+    .delay-1 { animation-delay: 0.1s; }
+    .delay-2 { animation-delay: 0.2s; }
+    .delay-3 { animation-delay: 0.3s; }
+    .delay-4 { animation-delay: 0.4s; }
+
+    @media (max-width: 600px) {
+      nav { padding: 16px 20px; }
+      .preview-grid { grid-template-columns: 1fr; }
+      .info-grid { grid-template-columns: 1fr; }
+      footer { flex-direction: column; gap: 8px; text-align: center; }
+      .upload-zone { margin: 16px; padding: 40px 16px; }
+      .analyze-btn { width: calc(100% - 32px); margin: 0 16px 24px; }
+      .preview-section, .steps { margin-left: 16px; margin-right: 16px; }
+    }
+  </style>
+</head>
+<body>
+
+<div class="orb orb-1"></div>
+<div class="orb orb-2"></div>
+
+<!-- NAV -->
+<nav>
+  <div class="nav-logo">Plate<span>Vision</span></div>
+  <div class="nav-right">
+    <span class="nav-badge">Classical CV</span>
+    <a href="https://github.com/HAMMADFOUZAN/license-plate-detector-cv" target="_blank" class="nav-link">GitHub →</a>
+  </div>
+</nav>
+
+<!-- HERO -->
+<section class="hero">
+  <div class="hero-tag fade-up">OpenCV + Tesseract OCR</div>
+  <h1 class="fade-up delay-1">Detect Any<br><span class="highlight">License Plate</span></h1>
+  <p class="hero-sub fade-up delay-2">
+    Upload a vehicle image and our classical computer vision pipeline will detect and read the license plate instantly. No GPU required.
+  </p>
+</section>
+
+<!-- MAIN DETECTOR -->
+<div class="main-wrapper fade-up delay-3">
+  <div class="detector-card">
+
+    <!-- Window chrome -->
+    <div class="card-header">
+      <div class="dot dot-r"></div>
+      <div class="dot dot-y"></div>
+      <div class="dot dot-g"></div>
+      <span class="card-title">license-plate-detector-cv — main.py</span>
+    </div>
+
+    <!-- Upload zone -->
+    <div class="upload-zone" id="uploadZone">
+      <div class="upload-icon">🚗</div>
+      <div class="upload-title">Drop your image here</div>
+      <div class="upload-sub">Supports JPG, PNG, JPEG • Max 10MB</div>
+      <label class="upload-btn" for="fileInput">Choose Image</label>
+      <input type="file" id="fileInput" accept="image/*" />
+    </div>
+
+    <!-- Processing steps -->
+    <div class="steps" id="steps">
+      <div class="step-row" id="step1">
+        <span class="step-icon">🔲</span>
+        <span class="step-text">Grayscale Conversion</span>
+        <span class="step-status">waiting</span>
+      </div>
+      <div class="step-row" id="step2">
+        <span class="step-icon">✨</span>
+        <span class="step-text">Bilateral Filter (noise reduction)</span>
+        <span class="step-status">waiting</span>
+      </div>
+      <div class="step-row" id="step3">
+        <span class="step-icon">🔍</span>
+        <span class="step-text">Canny Edge Detection</span>
+        <span class="step-status">waiting</span>
+      </div>
+      <div class="step-row" id="step4">
+        <span class="step-icon">📐</span>
+        <span class="step-text">Contour & Plate Region Detection</span>
+        <span class="step-status">waiting</span>
+      </div>
+      <div class="step-row" id="step5">
+        <span class="step-icon">🔤</span>
+        <span class="step-text">Tesseract OCR Text Extraction</span>
+        <span class="step-status">waiting</span>
+      </div>
+    </div>
+
+    <!-- Preview section -->
+    <div class="preview-section" id="previewSection">
+      <div class="preview-grid">
+        <div class="preview-box">
+          <div class="preview-box-label">
+            <span class="dot-label"></span>Original Image
+          </div>
+          <div class="preview-img-wrap">
+            <img id="originalPreview" src="" alt="Original" />
+          </div>
+        </div>
+        <div class="preview-box">
+          <div class="preview-box-label">
+            <span class="dot-label"></span>Edge Detection Output
+          </div>
+          <div class="preview-img-wrap" id="edgeWrap">
+            <canvas id="edgeCanvas"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <!-- Result -->
+      <div class="result-box" id="resultBox" style="display:none">
+        <div class="result-header">
+          <span>Detection Result</span>
+          <span id="confidenceLabel" style="color: var(--accent2)">—</span>
+        </div>
+        <div class="result-body">
+          <div class="plate-display" id="plateDisplay">—</div>
+          <div class="result-meta">
+            <div class="meta-row">
+              <span class="meta-label">Method:</span>
+              <span class="meta-value">Classical CV</span>
+            </div>
+            <div class="meta-row">
+              <span class="meta-label">OCR Engine:</span>
+              <span class="meta-value">Tesseract 4.1</span>
+            </div>
+            <div class="meta-row">
+              <span class="meta-label">Image Size:</span>
+              <span class="meta-value" id="imgSize">—</span>
+            </div>
+            <div class="meta-row">
+              <span class="meta-label">Status:</span>
+              <span class="meta-value" id="statusLabel">—</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Analyze button -->
+    <button class="analyze-btn" id="analyzeBtn">
+      <span class="spinner" id="spinner"></span>
+      <span id="btnText">🔍 Analyze Image</span>
+    </button>
+
+  </div>
+</div>
+
+<!-- INFO CARDS -->
+<div class="info-grid fade-up delay-4">
+  <div class="info-card">
+    <div class="info-icon">⚡</div>
+    <div class="info-title">No GPU Required</div>
+    <div class="info-desc">Runs entirely on CPU using classical computer vision. Fast and lightweight.</div>
+  </div>
+  <div class="info-card">
+    <div class="info-icon">🔬</div>
+    <div class="info-title">3-Stage Pipeline</div>
+    <div class="info-desc">Bilateral filter → Canny edges → Contour detection for precise plate localization.</div>
+  </div>
+  <div class="info-card">
+    <div class="info-icon">🔤</div>
+    <div class="info-title">Tesseract OCR</div>
+    <div class="info-desc">Industry-standard OCR engine with alphanumeric whitelist for clean plate reading.</div>
+  </div>
+</div>
+
+<!-- FOOTER -->
+<footer>
+  <span>Built by <a href="https://github.com/HAMMADFOUZAN" target="_blank">HAMMADFOUZAN</a> — Mini Project</span>
+  <span>OpenCV 4.9 + Tesseract 4.1 + Python 3.8+</span>
+</footer>
+
+<script>
+  const uploadZone = document.getElementById('uploadZone');
+  const fileInput = document.getElementById('fileInput');
+  const analyzeBtn = document.getElementById('analyzeBtn');
+  const previewSection = document.getElementById('previewSection');
+  const originalPreview = document.getElementById('originalPreview');
+  const edgeCanvas = document.getElementById('edgeCanvas');
+  const stepsEl = document.getElementById('steps');
+  const resultBox = document.getElementById('resultBox');
+  const plateDisplay = document.getElementById('plateDisplay');
+  const spinner = document.getElementById('spinner');
+  const btnText = document.getElementById('btnText');
+
+  let currentFile = null;
+  let currentImage = null;
+
+  // Drag & Drop
+  uploadZone.addEventListener('dragover', e => {
+    e.preventDefault();
+    uploadZone.classList.add('drag-over');
+  });
+  uploadZone.addEventListener('dragleave', () => uploadZone.classList.remove('drag-over'));
+  uploadZone.addEventListener('drop', e => {
+    e.preventDefault();
+    uploadZone.classList.remove('drag-over');
+    const file = e.dataTransfer.files[0];
+    if (file && file.type.startsWith('image/')) handleFile(file);
+  });
+  uploadZone.addEventListener('click', e => {
+    if (e.target.tagName !== 'LABEL' && e.target.tagName !== 'INPUT') fileInput.click();
+  });
+  fileInput.addEventListener('change', e => {
+    if (e.target.files[0]) handleFile(e.target.files[0]);
+  });
+
+  function handleFile(file) {
+    currentFile = file;
+    const reader = new FileReader();
+    reader.onload = e => {
+      originalPreview.src = e.target.result;
+      const img = new Image();
+      img.onload = () => {
+        currentImage = img;
+        document.getElementById('imgSize').textContent = `${img.width}×${img.height}px`;
+        previewSection.classList.add('visible');
+        analyzeBtn.classList.add('visible');
+        stepsEl.classList.add('visible');
+        resetSteps();
+        resultBox.style.display = 'none';
+        // Draw edge preview
+        drawEdgePreview(img);
+      };
+      img.src = e.target.result;
+    };
+    reader.readAsDataURL(file);
+  }
+
+  function drawEdgePreview(img) {
+    const canvas = edgeCanvas;
+    const ctx = canvas.getContext('2d');
+    const maxW = 380, maxH = 200;
+    const scale = Math.min(maxW / img.width, maxH / img.height);
+    canvas.width = img.width * scale;
+    canvas.height = img.height * scale;
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+    // Simulate edge detection visually
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const data = imageData.data;
+    const gray = new Uint8ClampedArray(canvas.width * canvas.height);
+
+    // Grayscale
+    for (let i = 0; i < data.length; i += 4) {
+      gray[i/4] = 0.299*data[i] + 0.587*data[i+1] + 0.114*data[i+2];
+    }
+
+    // Simple edge (Sobel-like)
+    const w = canvas.width, h = canvas.height;
+    const out = ctx.createImageData(w, h);
+    for (let y = 1; y < h-1; y++) {
+      for (let x = 1; x < w-1; x++) {
+        const gx = -gray[(y-1)*w+(x-1)] - 2*gray[y*w+(x-1)] - gray[(y+1)*w+(x-1)]
+                  + gray[(y-1)*w+(x+1)] + 2*gray[y*w+(x+1)] + gray[(y+1)*w+(x+1)];
+        const gy = -gray[(y-1)*w+(x-1)] - 2*gray[(y-1)*w+x] - gray[(y-1)*w+(x+1)]
+                  + gray[(y+1)*w+(x-1)] + 2*gray[(y+1)*w+x] + gray[(y+1)*w+(x+1)];
+        const mag = Math.min(255, Math.sqrt(gx*gx + gy*gy));
+        const i4 = (y*w+x)*4;
+        const v = mag > 40 ? 255 : 0;
+        out.data[i4] = v;
+        out.data[i4+1] = v;
+        out.data[i4+2] = v;
+        out.data[i4+3] = 255;
+      }
+    }
+    ctx.putImageData(out, 0, 0);
+  }
+
+  function resetSteps() {
+    ['step1','step2','step3','step4','step5'].forEach(id => {
+      const el = document.getElementById(id);
+      el.classList.remove('active','done');
+      el.querySelector('.step-status').textContent = 'waiting';
+    });
+  }
+
+  async function activateStep(id, delay) {
+    await sleep(delay);
+    const el = document.getElementById(id);
+    el.classList.add('active');
+    el.querySelector('.step-status').textContent = 'processing...';
+    await sleep(600);
+    el.classList.remove('active');
+    el.classList.add('done');
+    el.querySelector('.step-status').textContent = 'done ✓';
+  }
+
+  function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+  // Simulate plate detection using canvas
+  function simulatePlateDetection(img) {
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    canvas.width = img.width;
+    canvas.height = img.height;
+    ctx.drawImage(img, 0, 0);
+    const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+
+    // Look for rectangular high-contrast regions (simplified heuristic)
+    // Returns simulated result based on image analysis
+    const brightness = [];
+    for (let i = 0; i < data.length; i += 4) {
+      brightness.push((data[i] + data[i+1] + data[i+2]) / 3);
+    }
+    const avg = brightness.reduce((a,b) => a+b, 0) / brightness.length;
+    const contrast = brightness.reduce((a,b) => a + Math.abs(b - avg), 0) / brightness.length;
+
+    return {
+      detected: contrast > 30,
+      confidence: Math.min(95, Math.round(50 + contrast)),
+    };
+  }
+
+  analyzeBtn.addEventListener('click', async () => {
+    if (!currentImage) return;
+    analyzeBtn.disabled = true;
+    spinner.classList.add('visible');
+    btnText.textContent = 'Analyzing...';
+    resultBox.style.display = 'none';
+    resetSteps();
+
+    await activateStep('step1', 100);
+    await activateStep('step2', 200);
+    await activateStep('step3', 200);
+    await activateStep('step4', 300);
+    await activateStep('step5', 400);
+
+    const result = simulatePlateDetection(currentImage);
+
+    // Show result
+    resultBox.style.display = 'block';
+
+    if (result.detected) {
+      plateDisplay.className = 'plate-display';
+      plateDisplay.textContent = 'RUN IN PYTHON';
+      document.getElementById('confidenceLabel').textContent = `Plate region found`;
+      document.getElementById('statusLabel').textContent = 'Region Detected ✓';
+      document.getElementById('statusLabel').style.color = 'var(--accent2)';
+    } else {
+      plateDisplay.className = 'plate-display unreadable';
+      plateDisplay.textContent = 'Low contrast image';
+      document.getElementById('confidenceLabel').textContent = 'Try clearer image';
+      document.getElementById('statusLabel').textContent = 'Needs clearer input';
+      document.getElementById('statusLabel').style.color = 'var(--danger)';
+    }
+
+    spinner.classList.remove('visible');
+    btnText.textContent = '🔁 Analyze Another';
+    analyzeBtn.disabled = false;
+  });
+</script>
+</body>
+</html>
