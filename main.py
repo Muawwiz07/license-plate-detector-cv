@@ -1,177 +1,131 @@
 """
-app.py — Flask Backend for License Plate Detection
-Hosted on PythonAnywhere (free tier)
+License Plate Detection - Main Pipeline
+Classical CV Approach using OpenCV + Tesseract OCR
 """
 
-from flask import Flask, request, jsonify
-from flask_cors import CORS
 import cv2
-import numpy as np
-import pytesseract
-import re
-import base64
-import os
-
-app = Flask(__name__)
-CORS(app)  # Allow requests from GitHub Pages frontend
-
-# ── Tesseract path (PythonAnywhere) ──────────────────────────────────────────
-pytesseract.pytesseract.tesseract_cmd = '/usr/bin/tesseract'
+import sys
+from preprocess import preprocess_image
+from detect_plate import detect_license_plate
+from ocr import extract_text
 
 
-# ── Helper: decode base64 image ───────────────────────────────────────────────
-def decode_image(base64_str):
-    if ',' in base64_str:
-        base64_str = base64_str.split(',')[1]
-    img_bytes = base64.b64decode(base64_str)
-    np_arr = np.frombuffer(img_bytes, np.uint8)
-    return cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+def process_image(image_path: str, debug: bool = False) -> dict:
+    """
+    Full pipeline: Load → Preprocess → Detect → OCR → Output
+    
+    Args:
+        image_path: Path to input image
+        debug: If True, saves intermediate steps
+    
+    Returns:
+        dict with 'plate_image', 'text', 'bbox'
+    """
+    # Step 1: Load image
+    print(f"\n[1/4] Loading image: {image_path}")
+    image = cv2.imread(image_path)
+    if image is None:
+        raise FileNotFoundError(f"Could not load image: {image_path}")
+    print(f"      Image shape: {image.shape}")
+
+    # Step 2: Preprocess
+    print("[2/4] Preprocessing image...")
+    preprocessed = preprocess_image(image, debug=debug)
+
+    # Step 3: Detect plate
+    print("[3/4] Detecting license plate...")
+    result = detect_license_plate(image, preprocessed, debug=debug)
+
+    if result is None:
+        print("      ⚠ No license plate detected.")
+        return {"plate_image": None, "text": None, "bbox": None}
+
+    plate_img, bbox = result
+    print(f"      ✓ Plate detected at: {bbox}")
+
+    # Step 4: OCR
+    print("[4/4] Running OCR...")
+    plate_text = extract_text(plate_img, debug=debug)
+    print(f"      ✓ Extracted text: '{plate_text}'")
+
+    # Show final result
+    output = image.copy()
+    x, y, w, h = bbox
+    cv2.rectangle(output, (x, y), (x + w, y + h), (0, 255, 0), 3)
+    cv2.putText(output, plate_text, (x, y - 15),
+                cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 255, 0), 3)
+
+    cv2.imwrite("output/result.jpg", output)
+    cv2.imwrite("output/plate_crop.jpg", plate_img)
+    print("\n✅ Results saved to output/")
+    print(f"   Detected Plate: {plate_text}")
+
+    return {"plate_image": plate_img, "text": plate_text, "bbox": bbox}
 
 
-# ── Helper: encode image to base64 ───────────────────────────────────────────
-def encode_image(img):
-    _, buffer = cv2.imencode('.jpg', img)
-    return base64.b64encode(buffer).decode('utf-8')
+def process_video(video_path: str) -> None:
+    """
+    Process a video file frame by frame for license plate detection.
+    
+    Args:
+        video_path: Path to video file (or 0 for webcam)
+    """
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        raise FileNotFoundError(f"Cannot open video: {video_path}")
 
+    print(f"\n[VIDEO] Processing: {video_path}")
+    print("       Press 'q' to quit\n")
 
-# ── Preprocess ────────────────────────────────────────────────────────────────
-def preprocess(image):
-    gray     = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    filtered = cv2.bilateralFilter(gray, d=11, sigmaColor=17, sigmaSpace=17)
-    edges    = cv2.Canny(filtered, threshold1=30, threshold2=200)
-    return gray, filtered, edges
+    frame_count = 0
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
 
-
-# ── Detect plate ──────────────────────────────────────────────────────────────
-def detect_plate(original, edges):
-    contours, _ = cv2.findContours(
-        edges.copy(), cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE
-    )
-    contours = sorted(contours, key=cv2.contourArea, reverse=True)[:50]
-
-    for contour in contours:
-        perimeter = cv2.arcLength(contour, closed=True)
-        approx    = cv2.approxPolyDP(contour, 0.02 * perimeter, closed=True)
-
-        if not (4 <= len(approx) <= 6):
+        frame_count += 1
+        # Process every 5th frame for performance
+        if frame_count % 5 != 0:
+            cv2.imshow("License Plate Detection", frame)
+            if cv2.waitKey(1) & 0xFF == ord('q'):
+                break
             continue
 
-        x, y, w, h = cv2.boundingRect(approx)
-        aspect     = w / float(h)
+        preprocessed = preprocess_image(frame)
+        result = detect_license_plate(frame, preprocessed)
 
-        if not (1.5 <= aspect <= 8.0):
-            continue
+        if result:
+            plate_img, (x, y, w, h) = result
+            plate_text = extract_text(plate_img)
+            cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 3)
+            cv2.putText(frame, plate_text, (x, y - 10),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
 
-        img_area = original.shape[0] * original.shape[1]
-        if not (0.002 * img_area <= w * h <= 0.35 * img_area):
-            continue
+        cv2.imshow("License Plate Detection", frame)
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
 
-        pad   = 5
-        plate = original[max(0, y-pad):y+h+pad, max(0, x-pad):x+w+pad]
-        return plate, (x, y, w, h)
-
-    return None, None
-
-
-# ── OCR ───────────────────────────────────────────────────────────────────────
-def run_ocr(plate_img):
-    gray = cv2.cvtColor(plate_img, cv2.COLOR_BGR2GRAY) \
-           if len(plate_img.shape) == 3 else plate_img.copy()
-
-    scale = max(2, 100 // gray.shape[0] + 1)
-    gray  = cv2.resize(gray, None, fx=scale, fy=scale,
-                       interpolation=cv2.INTER_CUBIC)
-
-    _, binary = cv2.threshold(gray, 0, 255,
-                               cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-
-    config = (r'--oem 3 --psm 7 '
-              r'-c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789')
-
-    text = re.sub(r'[^A-Z0-9]', '',
-                  pytesseract.image_to_string(binary, config=config).strip().upper())
-
-    if not text:
-        inv  = cv2.bitwise_not(binary)
-        text = re.sub(r'[^A-Z0-9]', '',
-                      pytesseract.image_to_string(inv, config=config).strip().upper())
-
-    return text or 'UNREADABLE', binary
+    cap.release()
+    cv2.destroyAllWindows()
+    print("✅ Video processing complete.")
 
 
-# ── Routes ────────────────────────────────────────────────────────────────────
-@app.route('/')
-def home():
-    return jsonify({
-        'status': 'online',
-        'project': 'License Plate Detector — Classical CV',
-        'author': 'HAMMADFOUZAN',
-        'endpoints': ['/detect', '/health']
-    })
+if __name__ == "__main__":
+    import os
+    os.makedirs("output", exist_ok=True)
 
+    if len(sys.argv) < 2:
+        print("Usage:")
+        print("  python main.py <image_path>          # Process image")
+        print("  python main.py <video_path> --video  # Process video")
+        print("  python main.py 0 --video             # Webcam")
+        sys.exit(1)
 
-@app.route('/health')
-def health():
-    return jsonify({'status': 'ok'})
+    path = sys.argv[1]
+    is_video = "--video" in sys.argv
 
-
-@app.route('/detect', methods=['POST'])
-def detect():
-    try:
-        data = request.get_json()
-        if not data or 'image' not in data:
-            return jsonify({'error': 'No image provided'}), 400
-
-        # Decode image
-        image = decode_image(data['image'])
-        if image is None:
-            return jsonify({'error': 'Invalid image'}), 400
-
-        h, w = image.shape[:2]
-
-        # Pipeline
-        gray, filtered, edges = preprocess(image)
-        plate_img, bbox        = detect_plate(image, edges)
-
-        if plate_img is None:
-            # Return edges image even if no plate found
-            edges_rgb = cv2.cvtColor(edges, cv2.COLOR_GRAY2BGR)
-            return jsonify({
-                'detected': False,
-                'plate_text': 'NOT DETECTED',
-                'bbox': None,
-                'edges_image': encode_image(edges_rgb),
-                'image_size': f'{w}x{h}',
-                'message': 'No plate region found. Try a clearer image.'
-            })
-
-        # OCR
-        plate_text, binary = run_ocr(plate_img)
-
-        # Draw result on original
-        x, y, bw, bh = bbox
-        result_img   = image.copy()
-        cv2.rectangle(result_img, (x, y), (x+bw, y+bh), (0, 255, 0), 3)
-        cv2.putText(result_img, plate_text, (x, y - 15),
-                    cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 255, 0), 3)
-
-        # Encode outputs
-        edges_rgb = cv2.cvtColor(edges, cv2.COLOR_GRAY2BGR)
-
-        return jsonify({
-            'detected': True,
-            'plate_text': plate_text,
-            'bbox': {'x': x, 'y': y, 'w': bw, 'h': bh},
-            'result_image': encode_image(result_img),
-            'plate_crop': encode_image(plate_img),
-            'edges_image': encode_image(edges_rgb),
-            'image_size': f'{w}x{h}',
-            'message': 'Plate detected successfully!'
-        })
-
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-
-if __name__ == '__main__':
-    app.run(debug=True)
+    if is_video:
+        src = int(path) if path == "0" else path
+        process_video(src)
+    else:
+        process_image(path, debug=True)
